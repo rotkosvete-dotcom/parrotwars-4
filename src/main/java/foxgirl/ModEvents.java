@@ -1,6 +1,11 @@
 package foxgirl;
 
 import net.minecraft.commands.Commands;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.RecordItem;
@@ -47,8 +52,48 @@ public class ModEvents {
 			}
 		}
 
+		/** Новый мир: строим квартиру на спавне. Старые миры не трогаем (для них есть /apartment). */
+		@SubscribeEvent
+		public static void onServerStarted(ServerStartedEvent event) {
+			ServerLevel overworld = event.getServer().overworld();
+			ApartmentData d = Apartment.data(overworld);
+			if (d.built || overworld.getGameTime() > 200) return;
+			d.spawn = Apartment.build(overworld, overworld.getSharedSpawnPos());
+			d.built = true;
+			d.setDirty();
+			overworld.setDefaultSpawnPos(d.spawn, 0f);
+		}
+
+		/** Каждый новый игрок первый раз появляется в квартире. */
+		@SubscribeEvent
+		public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
+			if (!(event.getEntity() instanceof ServerPlayer sp)) return;
+			ServerLevel overworld = sp.server.overworld();
+			ApartmentData d = Apartment.data(overworld);
+			if (!d.built || !d.greeted.add(sp.getUUID())) return;
+			d.setDirty();
+			BlockPos p = d.spawn;
+			sp.teleportTo(overworld, p.getX() + 0.5, p.getY(), p.getZ() + 0.5, 0f, 0f);
+			sp.setRespawnPosition(net.minecraft.world.level.Level.OVERWORLD, p, 0f, true, false);
+		}
+
 		@SubscribeEvent
 		public static void onServerStopping(ServerStoppingEvent event) { Lures.clear(); }
+
+		/** /apartment — построить квартиру там, где стоишь (для старых миров). */
+		@SubscribeEvent
+		public static void onApartmentCommand(RegisterCommandsEvent event) {
+			event.getDispatcher().register(Commands.literal("apartment")
+				.requires(src -> src.hasPermission(2))
+				.executes(ctx -> {
+					ServerPlayer player = ctx.getSource().getPlayerOrException();
+					ServerLevel level = player.serverLevel();
+					BlockPos spawn = Apartment.build(level, player.blockPosition());
+					player.teleportTo(level, spawn.getX() + 0.5, spawn.getY(), spawn.getZ() + 0.5, 0f, 0f);
+					player.displayClientMessage(Component.translatable("message.foxgirl.apartment_built"), true);
+					return 1;
+				}));
+		}
 
 		/** /backrooms — телепорт туда и обратно (для операторов, удобно для проверки). */
 		@SubscribeEvent

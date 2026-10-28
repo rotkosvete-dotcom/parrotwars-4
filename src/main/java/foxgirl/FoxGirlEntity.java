@@ -69,6 +69,10 @@ public class FoxGirlEntity extends TamableAnimal {
 	private static final float[] SCALES = {0.3f, 1.0f, 1.25f};
 	private static final EntityDataAccessor<Integer> SIZE_STATE =
 		SynchedEntityData.defineId(FoxGirlEntity.class, EntityDataSerializers.INT);
+	/** Котята ("котяты") — маленькие Фурритян: не охотятся, ходят за мамой/хозяином. */
+	private static final EntityDataAccessor<Boolean> KITTEN =
+		SynchedEntityData.defineId(FoxGirlEntity.class, EntityDataSerializers.BOOLEAN);
+	private static final float KITTEN_FACTOR = 0.4f;
 	private static final UUID BIG_DAMAGE_ID = UUID.fromString("5b7f6a40-2d1c-4a77-9a50-0c4f0a1b9e11");
 
 	private int hunger = 12;
@@ -95,24 +99,37 @@ public class FoxGirlEntity extends TamableAnimal {
 	protected void defineSynchedData() {
 		super.defineSynchedData();
 		this.entityData.define(SIZE_STATE, 1);
+		this.entityData.define(KITTEN, false);
 	}
 
 	@Override
 	public void onSyncedDataUpdated(EntityDataAccessor<?> key) {
-		if (SIZE_STATE.equals(key)) this.refreshDimensions();
+		if (SIZE_STATE.equals(key) || KITTEN.equals(key)) this.refreshDimensions();
+		if (KITTEN.equals(key)) this.renderScale = SCALES[this.getSizeState()] * NORMAL_RENDER * this.kittenFactor();
 		super.onSyncedDataUpdated(key);
 	}
 
 	@Override
 	public EntityDimensions getDimensions(Pose pose) {
 		EntityDimensions base = super.getDimensions(pose);
-		return this.ready ? base.scale(SCALES[this.getSizeState()]) : base;
+		return this.ready ? base.scale(SCALES[this.getSizeState()] * this.kittenFactor()) : base;
 	}
 
 	public int getSizeState() { return Math.max(0, Math.min(2, this.entityData.get(SIZE_STATE))); }
 	public float getScaleFactor() { return SCALES[this.getSizeState()]; }
 	public float getRenderScale() { return this.renderScale; }
 	public int getTailSwing() { return this.tailSwing; }
+	public boolean isKitten() { return this.entityData.get(KITTEN); }
+	private float kittenFactor() { return this.ready && this.isKitten() ? KITTEN_FACTOR : 1f; }
+
+	public void setKitten(boolean kitten) {
+		this.entityData.set(KITTEN, kitten);
+		if (kitten) {
+			this.getAttribute(Attributes.MAX_HEALTH).setBaseValue(10.0);
+			this.setHealth(10.0f);
+		}
+		this.refreshDimensions();
+	}
 
 	@Override
 	protected void registerGoals() {
@@ -122,6 +139,7 @@ public class FoxGirlEntity extends TamableAnimal {
 		this.goalSelector.addGoal(4, new MeleeAttackGoal(this, 1.2, true));
 		this.goalSelector.addGoal(5, new FollowOwnerGoal(this, 1.1, 8.0f, 2.0f, false));
 		this.goalSelector.addGoal(5, new InvestigateLureGoal(this));
+		this.goalSelector.addGoal(6, new FollowMotherGoal(this));
 		this.goalSelector.addGoal(6, new TemptGoal(this, 1.1,
 			Ingredient.of(Items.SWEET_BERRIES, Items.COOKED_CHICKEN, Items.COOKED_BEEF, Items.COOKED_PORKCHOP), false));
 		this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 0.9));
@@ -133,24 +151,25 @@ public class FoxGirlEntity extends TamableAnimal {
 		this.targetSelector.addGoal(3, new HurtByTargetGoal(this).setAlertOthers());
 		// В Закулисье дикая Фурритян охотится на игрока
 		this.targetSelector.addGoal(3, new NearestAttackableTargetGoal<>(this, Player.class, 10, true, false,
-			e -> !this.isTame() && this.level().dimension().equals(Backrooms.DIMENSION)));
+			e -> !this.isKitten() && !this.isTame() && this.level().dimension().equals(Backrooms.DIMENSION)));
 		this.targetSelector.addGoal(4, new NearestAttackableTargetGoal<>(this, Monster.class, 5, false, false,
-			e -> this.isTame() && this.hunger > 0 && !(e instanceof Creeper)));
+			e -> !this.isKitten() && this.isTame() && this.hunger > 0 && !(e instanceof Creeper)));
 	}
 
 	@Override
 	public void setTame(boolean tame) {
 		super.setTame(tame);
 		if (tame) {
-			this.getAttribute(Attributes.MAX_HEALTH).setBaseValue(30.0);
-			this.setHealth(30.0f);
+			double hp = this.isKitten() ? 14.0 : 30.0;
+			this.getAttribute(Attributes.MAX_HEALTH).setBaseValue(hp);
+			this.setHealth((float) hp);
 		}
 	}
 
 	// ---------- размер ----------
 
 	private boolean canFit(int state) {
-		EntityDimensions d = this.getType().getDimensions().scale(SCALES[state]);
+		EntityDimensions d = this.getType().getDimensions().scale(SCALES[state] * this.kittenFactor());
 		AABB box = d.makeBoundingBox(this.position());
 		return this.level().noCollision(this, box);
 	}
@@ -205,6 +224,7 @@ public class FoxGirlEntity extends TamableAnimal {
 
 	/** Размер выбирает сама Фурритян — по ситуации. */
 	private void updateSize() {
+		if (this.isKitten()) { this.setSizeState(1); return; }
 		if (this.sizeHold > 0) { this.sizeHold -= 10; return; }
 
 		int want = 1;
@@ -229,6 +249,7 @@ public class FoxGirlEntity extends TamableAnimal {
 	// ---------- хвост ----------
 
 	private void tailAttack() {
+		if (this.isKitten()) return;
 		LivingEntity target = this.getTarget();
 		if (target == null || !target.isAlive() || this.tailCooldown > 0) return;
 		if (this.isTame() && this.hunger <= 0) return;
@@ -276,6 +297,10 @@ public class FoxGirlEntity extends TamableAnimal {
 					if (!this.isTame()) {
 						if (this.random.nextInt(3) == 0) {
 							this.tame(player);
+							for (FoxGirlEntity k : this.level().getEntitiesOfClass(FoxGirlEntity.class, this.getBoundingBox().inflate(24.0), x -> x.isKitten() && !x.isTame())) {
+								k.tame(player);
+								k.setOrderedToSit(false);
+							}
 							this.navigation.stop();
 							this.setTarget(null);
 							this.setOrderedToSit(false);
@@ -316,7 +341,7 @@ public class FoxGirlEntity extends TamableAnimal {
 
 		if (this.level().isClientSide) {
 			if (this.tailSwing > 0) this.tailSwing--;
-			this.renderScale += (SCALES[this.getSizeState()] * NORMAL_RENDER - this.renderScale) * 0.25f;
+			this.renderScale += (SCALES[this.getSizeState()] * NORMAL_RENDER * this.kittenFactor() - this.renderScale) * 0.25f;
 			return;
 		}
 
@@ -324,7 +349,7 @@ public class FoxGirlEntity extends TamableAnimal {
 		if (this.tickCount % 10 == 0) this.updateSize();
 		this.tailAttack();
 
-		if (!this.isTame()) return;
+		if (!this.isTame() || this.isKitten()) return;
 
 		// Голод
 		if (this.tickCount % HUNGER_TICKS == 0 && this.hunger > 0) {
@@ -375,16 +400,18 @@ public class FoxGirlEntity extends TamableAnimal {
 		super.addAdditionalSaveData(tag);
 		tag.putInt("FoxHunger", this.hunger);
 		tag.putInt("SizeState", this.getSizeState());
+		tag.putBoolean("Kitten", this.isKitten());
 	}
 
 	@Override
 	public void readAdditionalSaveData(CompoundTag tag) {
 		super.readAdditionalSaveData(tag);
+		if (tag.contains("Kitten")) this.entityData.set(KITTEN, tag.getBoolean("Kitten"));
 		if (tag.contains("FoxHunger")) this.hunger = tag.getInt("FoxHunger");
 		if (tag.contains("SizeState")) {
 			int s = Math.max(0, Math.min(2, tag.getInt("SizeState")));
 			this.entityData.set(SIZE_STATE, s);
-			this.renderScale = SCALES[s] * NORMAL_RENDER;
+			this.renderScale = SCALES[s] * NORMAL_RENDER * this.kittenFactor();
 			this.refreshDimensions();
 		}
 	}

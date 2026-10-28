@@ -7,5 +7,6 @@
   "message.foxgirl.hungry": "Твоя Фурритян голодна! Покорми её.",
   "message.foxgirl.sit": "Она сидит и ждёт.",
   "message.foxgirl.follow": "Она идёт за тобой.",
-  "message.foxgirl.no_dimension": "Измерение Закулисья не найдено."
+  "message.foxgirl.no_dimension": "Измерение Закулисья не найдено.",
+  "message.foxgirl.apartment_built": "Квартира построена."
 }

@@ -3,6 +3,10 @@ package foxgirl;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.LevelHeightAccessor;
@@ -76,7 +80,40 @@ public class BackroomsGenerator extends ChunkGenerator {
 		return (h >>> 11) * (1.0 / (1L << 53));
 	}
 
+	// ---- «Её комната»: место, где игрок впервые видит Фурритян (x 24..42, z 18..36) ----
+
+	private static boolean inLair(int wx, int wz) { return wx >= 25 && wx <= 41 && wz >= 19 && wz <= 35; }
+
+	private static boolean onLairDoor(int wx, int wz) {
+		return ((wx == 24 || wx == 42) && wz >= 26 && wz <= 28) || ((wz == 18 || wz == 36) && wx >= 32 && wx <= 34);
+	}
+
+	private static BlockState lairBlock(int wx, int y, int wz) {
+		if (y == 1) {
+			if (wz == 22 && wx == 36) return Blocks.RED_BED.defaultBlockState()
+				.setValue(BedBlock.FACING, Direction.EAST).setValue(BedBlock.PART, BedPart.FOOT);
+			if (wz == 22 && wx == 37) return Blocks.RED_BED.defaultBlockState()
+				.setValue(BedBlock.FACING, Direction.EAST).setValue(BedBlock.PART, BedPart.HEAD);
+			if (wx >= 30 && wx <= 35 && wz >= 24 && wz <= 29) return Blocks.RED_CARPET.defaultBlockState();
+			if (wx >= 27 && wx <= 28 && wz >= 30 && wz <= 31) return Blocks.OAK_FENCE.defaultBlockState();
+			if (wx == 39 && wz == 32) return Blocks.JUKEBOX.defaultBlockState();
+		}
+		if (y == 2 && wx >= 27 && wx <= 28 && wz >= 30 && wz <= 31) return Blocks.OAK_PRESSURE_PLATE.defaultBlockState();
+		return null;
+	}
+
+	private static boolean lairMoss(int wx, int wz) {
+		return inLair(wx, wz) && !isLamp(wx, wz) && rnd(wx, wz, 11) < 0.35;
+	}
+
+	/** Длина свисающих лоз в этом столбце (0 — нет). */
+	private static int vineLen(int wx, int wz) {
+		if (!lairMoss(wx, wz) || rnd(wx, wz, 12) >= 0.45) return 0;
+		return 2 + (int) (rnd(wx, wz, 13) * 3);
+	}
+
 	private static boolean isWall(int wx, int wz) {
+		if (inLair(wx, wz) || onLairDoor(wx, wz)) return false;
 		int mx = Math.floorMod(wx, CELL), mz = Math.floorMod(wz, CELL);
 		int cx = Math.floorDiv(wx, CELL), cz = Math.floorDiv(wz, CELL);
 		if (mx == 0 && mz == 0) return true;               // столбик на углу
@@ -123,10 +160,18 @@ public class BackroomsGenerator extends ChunkGenerator {
 				set(chunk, pos.set(x, FLOOR_Y, z), pal.floor(), oceanFloor, surface);
 				for (int y = FLOOR_Y + 1; y < CEILING_Y; y++) {
 					BlockState st = wall ? pal.wall() : AIR;
+					if (!wall && lairBlock(wx, y, wz) != null) st = lairBlock(wx, y, wz);
+					int vn = wall ? 0 : vineLen(wx, wz);
+					if (vn > 0 && lairBlock(wx, y, wz) == null && y >= CEILING_Y - vn) {
+						boolean berries = rnd(wx, wz, 14) < 0.3;
+						st = (y == CEILING_Y - vn)
+							? Blocks.CAVE_VINES.defaultBlockState().setValue(BlockStateProperties.AGE_25, 25).setValue(BlockStateProperties.BERRIES, berries)
+							: Blocks.CAVE_VINES_PLANT.defaultBlockState().setValue(BlockStateProperties.BERRIES, berries);
+					}
 					if (!wall && y == FLOOR_Y + 1 && pal.decor() != null && rnd(wx, wz, 7) < 0.03) st = pal.decor();
 					set(chunk, pos.set(x, y, z), st, oceanFloor, surface);
 				}
-				set(chunk, pos.set(x, CEILING_Y, z), isLamp(wx, wz) ? pal.lamp() : pal.ceiling(), oceanFloor, surface);
+				set(chunk, pos.set(x, CEILING_Y, z), isLamp(wx, wz) ? pal.lamp() : (lairMoss(wx, wz) ? Blocks.MOSS_BLOCK.defaultBlockState() : pal.ceiling()), oceanFloor, surface);
 			}
 		}
 		return CompletableFuture.completedFuture(chunk);

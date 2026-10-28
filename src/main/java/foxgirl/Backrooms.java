@@ -55,6 +55,16 @@ public final class Backrooms {
 		fox.setPersistenceRequired();
 		level.addFreshEntity(fox);
 
+		// Котята ("котяты") — маленькие копии рядом с ней
+		for (int i = 0; i < 3; i++) {
+			FoxGirlEntity kitten = FoxGirlMod.FOX_GIRL.get().create(level);
+			if (kitten == null) continue;
+			kitten.setKitten(true);
+			kitten.moveTo(FOX_X + 0.5 + (i - 1) * 1.2, 1.0, FOX_Z + 2.0, level.random.nextFloat() * 360f, 0f);
+			kitten.setPersistenceRequired();
+			level.addFreshEntity(kitten);
+		}
+
 		data.spawned = true;
 		data.setDirty();
 	}
